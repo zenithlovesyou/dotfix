@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Windows console encoding.** Windows consoles default to a legacy code page
+  (cp1252), which cannot represent the box-drawing and status characters the
+  tool prints. Every command died with a `UnicodeEncodeError` before doing any
+  work. stdout/stderr are now reconfigured to UTF-8 with a replacement
+  fallback.
+- Windows directory symlinks are reparse points, so `unlink()` on one raises
+  `PermissionError`; `rmdir()` is the call that removes the link itself.
+  `remove_symlink()` handles both, and never follows the link.
 - macOS `Path.resolve()` collapses symlinked parents (`/var` → `/private/var`);
   `dotfix` now compares resolved paths and reports dangling links correctly.
 - Windows `Path.home()` ignores `$HOME` (uses `USERPROFILE`), which made the
@@ -24,6 +32,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (non-raising) behaviour, making "broken" detection dead code on modern Python.
 - `clean` did not report shadowed repo copies as managed when scanning shared
   targets, and `import` could double-report each symlink. Both fixed.
+- The test suite now skips symlink-dependent tests on platforms that cannot
+  create symlinks without elevation, and CI reports whether the runner
+  supports them, so a skipped test is never mistaken for a passing one.
 
 [Unreleased]: https://github.com/zenithlovesyou/dotfix/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/zenithlovesyou/dotfix/releases/tag/v0.1.0
