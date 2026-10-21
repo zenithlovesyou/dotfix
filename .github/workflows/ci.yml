@@ -28,6 +28,24 @@ jobs:
         # symlink permission — the rest of the suite still runs there.
         run: python -m unittest discover -s tests -v
 
+      - name: Report environment
+        if: always()
+        shell: bash
+        run: |
+          echo "python: $(python -V 2>&1)"
+          echo "platform: $(python -c 'import sys; print(sys.platform)')"
+          # Show whether this runner can create symlinks, so a skipped test
+          # is never mistaken for a passing one.
+          python -c "
+          import os, tempfile
+          d = tempfile.mkdtemp()
+          try:
+              os.symlink(d, os.path.join(d, 'x'), target_is_directory=True)
+              print('symlinks: supported')
+          except OSError as e:
+              print('symlinks: NOT supported —', e)
+          "
+
   lint:
     name: lint
     runs-on: ubuntu-latest
