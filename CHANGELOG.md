@@ -14,6 +14,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   matched a plain path. Every correctly-linked symlink was therefore
   misreported as drift, and a hand-made link was not recognised as a
   conflict. `strip_extended_prefix()` normalises both sides before comparing.
+- The test harness decoded the tool's output with the platform's default
+  encoding (cp1252 on Windows) while the tool writes UTF-8; it now decodes
+  explicitly.
+- The test harness gave the tool a child environment containing only the
+  sandbox HOME variables. On Windows a process without `SystemRoot` cannot
+  load the crypto library, which killed Python 3.9 and 3.10 before `main()`.
 - **Windows console encoding.** Windows consoles default to a legacy code page
   (cp1252), which cannot represent the box-drawing and status characters the
   tool prints. Every command died with a `UnicodeEncodeError` before doing any
