@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Windows symlink comparison.** `os.readlink()` on Windows returns a device
+  path with the `\\?\` extended-length prefix (`\\?\C:\Users\me`), which never
+  matched a plain path. Every correctly-linked symlink was therefore
+  misreported as drift, and a hand-made link was not recognised as a
+  conflict. `strip_extended_prefix()` normalises both sides before comparing.
 - **Windows console encoding.** Windows consoles default to a legacy code page
   (cp1252), which cannot represent the box-drawing and status characters the
   tool prints. Every command died with a `UnicodeEncodeError` before doing any
