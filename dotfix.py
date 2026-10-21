@@ -642,28 +642,54 @@ def cmd_init(args):
 
 
 def cmd_import(args):
-    """Import existing symlinks in ~/.config as managed items."""
+    """Report which existing symlinks in the target are already managed."""
     repos = load_repos()
 
-    imported = 0
-    for repo in repos:
-        if not repo.target.exists():
+    # Build the set of every path a repo claims, across all repos. A symlink is
+    # managed if it points at any of them — not just the ones for one repo.
+    managed_paths = {}
+    for entry in build_plan(repos):
+        try:
+            managed_paths.setdefault(entry.item.resolve(), entry.repo.name)
+        except Exception:
             continue
-        for target_item in repo.target.iterdir():
-            if target_item.is_symlink():
-                try:
-                    resolved = target_item.resolve()
-                    for item in scan_repo(repo):
-                        if item.resolve() == resolved:
-                            print(f"{Color.GREEN}  ✓ Already managed: {target_item.name}{Color.RESET}")
-                            imported += 1
-                            break
-                    else:
-                        print(f"{Color.YELLOW}  ? Orphan symlink: {target_item.name} → {resolved}{Color.RESET}")
-                except Exception:
-                    print(f"{Color.RED}  ✗ Broken: {target_item.name}{Color.RESET}")
 
-    print(f"\n{Color.BOLD}Managed items: {imported}{Color.RESET}")
+    # Scan each distinct target directory exactly once.
+    scanned = set()
+    imported = 0
+    orphans = 0
+    broken = 0
+
+    for repo in repos:
+        target = repo.target
+        if not target.exists() or target in scanned:
+            continue
+        scanned.add(target)
+
+        for target_item in sorted(target.iterdir()):
+            if not target_item.is_symlink():
+                continue
+            try:
+                resolved = target_item.resolve()
+            except Exception:
+                print(f"{Color.RED}  ✗ Broken: {target_item.name}{Color.RESET}")
+                broken += 1
+                continue
+
+            owner = managed_paths.get(resolved)
+            if owner:
+                print(f"{Color.GREEN}  ✓ Managed: {target_item.name} → {owner}{Color.RESET}")
+                imported += 1
+            else:
+                print(f"{Color.YELLOW}  ? Orphan: {target_item.name} → {resolved}{Color.RESET}")
+                orphans += 1
+
+    print(
+        f"\n{Color.BOLD}Managed: {Color.GREEN}{imported}{Color.RESET}  "
+        f"{Color.YELLOW}orphans: {orphans}{Color.RESET}  "
+        f"{Color.RED}broken: {broken}{Color.RESET}"
+    )
+    return 0
     return 0
 
 

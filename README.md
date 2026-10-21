@@ -128,6 +128,11 @@ dotfix clean -n      # preview
 dotfix clean         # do it
 ```
 
+### `dotfix import`
+Reports which symlinks already in the target are managed (and by which repo),
+and which are orphans pointing at nothing dotfix knows about. Useful for
+auditing a target directory that was linked up by hand.
+
 ### `dotfix repo`
 Manage source repos.
 

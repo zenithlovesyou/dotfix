@@ -330,6 +330,37 @@ class DotfixTest(unittest.TestCase):
         self.assertEqual(plain.read_text(), "not managed, must stay")
         self.assertTrue((plain_dir / "inside.txt").exists())
 
+    def test_import_reports_managed_and_orphan(self):
+        r1 = self.sb.make_repo("first", {"nvim/init.lua": "1"})
+        r2 = self.sb.make_repo("second", {"swaync/config": "2"})
+        self.sb.configure([("first", r1, ["*"]), ("second", r2, ["*"])])
+        self.dotfix("sync")
+
+        # An orphan pointing outside every repo
+        other = self.home / "other"
+        other.mkdir()
+        (self.config / "orphan").symlink_to(other)
+
+        rc, out, err = self.dotfix("import")
+        self.assertEqual(rc, 0, err)
+        self.assertIn("Managed: nvim", out)
+        self.assertIn("Managed: swaync", out)
+        self.assertIn("Orphan: orphan", out)
+
+    def test_import_scans_shared_target_once(self):
+        """Two repos pointing at one target must not double-report symlinks."""
+        r1 = self.sb.make_repo("first", {"nvim/init.lua": "1"})
+        r2 = self.sb.make_repo("second", {"swaync/config": "2"})
+        self.sb.configure([("first", r1, ["*"]), ("second", r2, ["*"])])
+        self.dotfix("sync")
+
+        rc, out, err = self.dotfix("import")
+        self.assertEqual(rc, 0, err)
+        # Each symlink should be reported exactly once.
+        self.assertEqual(out.count("Managed: nvim"), 1)
+        self.assertEqual(out.count("Managed: swaync"), 1)
+        self.assertEqual(out.count("Orphan"), 0)
+
     def test_idempotent_sync(self):
         repo = self.sb.make_repo("dots", {"nvim/init.lua": "x", "tmux/tmux.conf": "y"})
         self.sb.configure([("dots", repo, ["*"])])
