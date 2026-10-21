@@ -284,14 +284,33 @@ def scan_repo(repo: RepoConfig) -> list[Path]:
     return items
 
 
+def strip_extended_prefix(path: str) -> str:
+    """Remove the Windows extended-length prefix from a path.
+
+    os.readlink() on Windows returns a device path such as
+    "\\\\?\\C:\\Users\\me", while the same location written out plainly is
+    "C:\\Users\\me". They name the same file but never compare equal, so the
+    prefix has to come off before anything is compared.
+    """
+    if path.startswith("\\\\?\\UNC\\"):
+        return "\\\\" + path[len("\\\\?\\UNC\\"):]
+    if path.startswith("\\\\?\\"):
+        return path[len("\\\\?\\"):]
+    return path
+
+
 def same_path(a: Path, b: Path) -> bool:
     """Compare two paths the way the platform does.
 
-    realpath() collapses symlinked parents (macOS /var -> /private/var) and
-    normcase() makes the comparison case-insensitive on Windows.
+    realpath() collapses symlinked parents (macOS /var -> /private/var),
+    normcase() makes the comparison case-insensitive on Windows, and the
+    extended-length prefix is dropped so a path read back from a symlink
+    still matches the plain path it was created from.
     """
     try:
-        return os.path.normcase(os.path.realpath(str(a))) == os.path.normcase(os.path.realpath(str(b)))
+        left = strip_extended_prefix(os.path.realpath(str(a)))
+        right = strip_extended_prefix(os.path.realpath(str(b)))
+        return os.path.normcase(left) == os.path.normcase(right)
     except Exception:
         return False
 

@@ -222,8 +222,12 @@ class DotfixTest(unittest.TestCase):
 
         rc, out, err = self.dotfix("sync")
         self.assertIn("Conflict", out)
-        # The hand-made link must survive untouched.
-        self.assertEqual(os.readlink(str(self.config / "nvim")), str(mine))
+        # The hand-made link must survive untouched. readlink() on Windows
+        # returns a \\?\ device path, so compare the resolved paths instead of
+        # the raw strings.
+        import importlib
+        mod = importlib.import_module("dotfix")
+        self.assertTrue(mod.same_path(os.readlink(str(self.config / "nvim")), str(mine)))
         self.assertTrue((self.config / "nvim" / "init.lua").exists())
 
     def test_backup_saves_conflicting_files(self):
@@ -514,7 +518,13 @@ class DotfixTest(unittest.TestCase):
         mod.create_symlink(link, src)
         self.assertTrue(link.is_symlink())
         self.assertTrue(link.is_dir())
-        self.assertEqual(os.readlink(str(link)), str(src))
+        # On Windows, os.readlink() returns device paths with a \\?\ prefix
+        # (e.g. "\\?\C:\\Users\\..."), which never matches a bare path string
+        # against src. Use same_path(), which normalises both sides the way
+        # the platform does.
+        import importlib
+        mod = importlib.import_module("dotfix")
+        self.assertTrue(mod.same_path(os.readlink(str(link)), str(src)))
 
     def test_output_survives_legacy_console_encoding(self):
         """Windows consoles default to cp1252, where box-drawing chars crash."""
