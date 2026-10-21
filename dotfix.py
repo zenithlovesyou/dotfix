@@ -172,6 +172,26 @@ def create_symlink(link: Path, target: Path):
         os.symlink(str(target), str(link), target_is_directory=target.is_dir())
 
 
+def remove_symlink(link: Path):
+    """Remove a symlink without touching what it points to.
+
+    On Windows a directory symlink is a reparse point: unlink() on it raises
+    PermissionError and rmdir() is the correct call. Removing a directory
+    symlink must never delete the directory it points at.
+    """
+    try:
+        link.unlink()
+    except PermissionError:
+        os.rmdir(str(link))
+    except OSError:
+        # A directory symlink on Windows can also surface as EISDIR/EPERM
+        # depending on the filesystem; rmdir() is safe for the link itself.
+        if link.is_symlink():
+            os.rmdir(str(link))
+        else:
+            raise
+
+
 def should_ignore(name: str, ignore_patterns: list[str]) -> bool:
     for pat in ignore_patterns:
         if pat.endswith("*"):
@@ -539,7 +559,9 @@ def cmd_sync(args):
 
         try:
             if target_path.exists() or target_path.is_symlink():
-                if target_path.is_dir() and not target_path.is_symlink():
+                if target_path.is_symlink():
+                    remove_symlink(target_path)
+                elif target_path.is_dir():
                     shutil.rmtree(target_path)
                 else:
                     target_path.unlink()
@@ -601,7 +623,7 @@ def cmd_clean(args):
                 arrow = f" → {resolved}"
                 print(f"{Color.BLUE}  → Would remove {reason}: {target_item.name}{arrow}{Color.RESET}")
             else:
-                target_item.unlink()
+                remove_symlink(target_item)
                 print(f"{Color.RED}  ✗ Removed {reason}: {target_item.name}{Color.RESET}")
                 removed += 1
 
