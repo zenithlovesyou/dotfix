@@ -16,7 +16,7 @@ dependencies — please keep it that way.
 ## Development
 
 ```bash
-git clone https://github.com/iamzephlol/dotfix
+git clone https://github.com/zenithlovesyou/dotfix
 cd dotfix
 python3 -m unittest discover -s tests -v
 ```

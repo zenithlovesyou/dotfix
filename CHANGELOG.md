@@ -45,5 +45,5 @@ Initial release.
 - `clean` only deletes symlinks — regular files are left alone.
 - `backup` preserves conflicting content before any forced overwrite.
 
-[Unreleased]: https://github.com/iamzephlol/dotfix/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/iamzephlol/dotfix/releases/tag/v0.1.0
+[Unreleased]: https://github.com/zenithlovesyou/dotfix/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/zenithlovesyou/dotfix/releases/tag/v0.1.0

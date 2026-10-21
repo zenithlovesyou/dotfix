@@ -5,7 +5,7 @@ description = "A dotfiles manager that actually handles multiple repositories"
 readme = "README.md"
 requires-python = ">=3.9"
 license = "MIT"
-authors = [{ name = "zephlol" }]
+authors = [{ name = "zenithlovesyou" }]
 keywords = ["dotfiles", "symlink", "config", "linux", "macos", "windows"]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -29,10 +29,10 @@ dependencies = []
 dotfix = "dotfix:main"
 
 [project.urls]
-Homepage = "https://github.com/iamzephlol/dotfix"
-Repository = "https://github.com/iamzephlol/dotfix"
-Issues = "https://github.com/iamzephlol/dotfix/issues"
-Changelog = "https://github.com/iamzephlol/dotfix/releases"
+Homepage = "https://github.com/zenithlovesyou/dotfix"
+Repository = "https://github.com/zenithlovesyou/dotfix"
+Issues = "https://github.com/zenithlovesyou/dotfix/issues"
+Changelog = "https://github.com/zenithlovesyou/dotfix/releases"
 
 [build-system]
 requires = ["setuptools>=61"]

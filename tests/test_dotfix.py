@@ -291,6 +291,45 @@ class DotfixTest(unittest.TestCase):
         rc, out, err = self.dotfix("repo", "list")
         self.assertNotIn("dots", out)
 
+    def test_clean_does_not_follow_symlink_out_of_target(self):
+        """clean must unlink the symlink, never delete the real file behind it."""
+        repo = self.sb.make_repo("dots", {"nvim/init.lua": "x"})
+        self.sb.configure([("dots", repo, ["*"])])
+
+        precious = self.home / "precious"
+        precious.mkdir()
+        (precious / "file.txt").write_text("IMPORTANT DATA")
+        (self.config / "danger").symlink_to(precious)
+        (self.config / "dangerfile").symlink_to(precious / "file.txt")
+
+        rc, out, err = self.dotfix("clean")
+        self.assertEqual(rc, 0, err)
+
+        # The symlinks are gone...
+        self.assertFalse((self.config / "danger").exists())
+        self.assertFalse((self.config / "dangerfile").exists())
+        # ...but the real data survives untouched.
+        self.assertTrue(precious.is_dir())
+        self.assertTrue((precious / "file.txt").exists())
+        self.assertEqual((precious / "file.txt").read_text(), "IMPORTANT DATA")
+
+    def test_clean_never_removes_regular_files(self):
+        repo = self.sb.make_repo("dots", {"nvim/init.lua": "x"})
+        self.sb.configure([("dots", repo, ["*"])])
+
+        plain = self.config / "plainfile"
+        plain.write_text("not managed, must stay")
+        plain_dir = self.config / "plaindir"
+        plain_dir.mkdir()
+        (plain_dir / "inside.txt").write_text("also must stay")
+
+        rc, out, err = self.dotfix("clean")
+        self.assertEqual(rc, 0, err)
+
+        self.assertTrue(plain.exists())
+        self.assertEqual(plain.read_text(), "not managed, must stay")
+        self.assertTrue((plain_dir / "inside.txt").exists())
+
     def test_idempotent_sync(self):
         repo = self.sb.make_repo("dots", {"nvim/init.lua": "x", "tmux/tmux.conf": "y"})
         self.sb.configure([("dots", repo, ["*"])])

@@ -1,5 +1,9 @@
 # dotfix
 
+[![CI](https://github.com/zenithlovesyou/dotfix/actions/workflows/ci.yml/badge.svg)](https://github.com/zenithlovesyou/dotfix/actions/workflows/ci.yml)
+[![Python](https://img.shields.io/badge/python-3.9%2B-blue.svg)](https://www.python.org/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+
 **A dotfiles manager that actually handles multiple repositories.**
 
 Most dotfiles tools assume you have exactly one repo and one target directory.
@@ -39,7 +43,7 @@ Zero dependencies. Single Python file. Works on Linux, macOS, Windows, WSL, Term
 ### From source (no dependencies)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/iamzephlol/dotfix/main/dotfix.py \
+curl -fsSL https://raw.githubusercontent.com/zenithlovesyou/dotfix/main/dotfix.py \
   -o ~/.local/bin/dotfix
 chmod +x ~/.local/bin/dotfix
 ```
@@ -47,7 +51,7 @@ chmod +x ~/.local/bin/dotfix
 Or clone and run the installer:
 
 ```bash
-git clone https://github.com/iamzephlol/dotfix
+git clone https://github.com/zenithlovesyou/dotfix
 cd dotfix
 ./install.sh
 ```
@@ -185,7 +189,7 @@ reports the failure rather than crashing.
 ## Development
 
 ```bash
-git clone https://github.com/iamzephlol/dotfix
+git clone https://github.com/zenithlovesyou/dotfix
 cd dotfix
 python3 -m unittest discover -s tests -v
 ```
