@@ -4,18 +4,22 @@ version = "0.1.0"
 description = "A dotfiles manager that actually handles multiple repositories"
 readme = "README.md"
 requires-python = ">=3.9"
-license = { file = "LICENSE" }
+license = "MIT"
 authors = [{ name = "zephlol" }]
 keywords = ["dotfiles", "symlink", "config", "linux", "macos", "windows"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Environment :: Console",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
     "Operating System :: MacOS",
     "Operating System :: Microsoft :: Windows",
     "Operating System :: POSIX :: Linux",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Topic :: System :: Installation/Setup",
     "Topic :: Utilities",
 ]
@@ -28,6 +32,7 @@ dotfix = "dotfix:main"
 Homepage = "https://github.com/iamzephlol/dotfix"
 Repository = "https://github.com/iamzephlol/dotfix"
 Issues = "https://github.com/iamzephlol/dotfix/issues"
+Changelog = "https://github.com/iamzephlol/dotfix/releases"
 
 [build-system]
 requires = ["setuptools>=61"]

@@ -36,16 +36,26 @@ Zero dependencies. Single Python file. Works on Linux, macOS, Windows, WSL, Term
 
 ## Install
 
+### From source (no dependencies)
+
 ```bash
-curl -fsSL https://raw.githubusercontent.com/iamzephlol/dotfix/main/dotfix \
+curl -fsSL https://raw.githubusercontent.com/iamzephlol/dotfix/main/dotfix.py \
   -o ~/.local/bin/dotfix
 chmod +x ~/.local/bin/dotfix
 ```
 
-Or with pipx / uv:
+Or clone and run the installer:
 
 ```bash
-uv tool install dotfix
+git clone https://github.com/iamzephlol/dotfix
+cd dotfix
+./install.sh
+```
+
+### With pip / uv
+
+```bash
+uv tool install dotfix      # or: pipx install dotfix
 ```
 
 ---
@@ -171,6 +181,22 @@ Symlink creation on Windows requires Developer Mode or admin rights — `dotfix`
 reports the failure rather than crashing.
 
 ---
+
+## Development
+
+```bash
+git clone https://github.com/iamzephlol/dotfix
+cd dotfix
+python3 -m unittest discover -s tests -v
+```
+
+The suite builds a fake `HOME` in a temp dir, so it never touches a real
+`~/.config`.
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md). The short version: stdlib only, one
+file, Python 3.9+, and never destroy user data without `--force`.
 
 ## License
 

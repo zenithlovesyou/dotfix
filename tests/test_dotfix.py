@@ -13,7 +13,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-DOTFIX = Path(__file__).resolve().parent.parent / "dotfix"
+DOTFIX = Path(__file__).resolve().parent.parent / "dotfix.py"
 
 
 def run(args, env=None, cwd=None):

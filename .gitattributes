@@ -1,0 +1,12 @@
+# Keep line endings sane across platforms.
+* text=auto eol=lf
+
+# Scripts must stay LF or shebangs break on Windows.
+*.sh text eol=lf
+*.py text eol=lf
+dotfix.py text eol=lf
+
+# Binary-ish
+*.png binary
+*.jpg binary
+*.ico binary

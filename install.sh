@@ -2,7 +2,7 @@
 # dotfix installer
 set -euo pipefail
 
-REPO="https://raw.githubusercontent.com/iamzephlol/dotfix/main/dotfix"
+REPO="https://raw.githubusercontent.com/iamzephlol/dotfix/main/dotfix.py"
 BIN_DIR="${DOTFIX_BIN_DIR:-$HOME/.local/bin}"
 
 info()  { printf '\033[0;36m::\033[0m %s\n' "$1"; }
