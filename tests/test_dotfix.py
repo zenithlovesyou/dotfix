@@ -26,7 +26,8 @@ def run(args, env=None, cwd=None):
     e.setdefault("XDG_CONFIG_HOME", str(cwd) if cwd else "")
     proc = subprocess.run(
         [sys.executable, str(DOTFIX), *args],
-        capture_output=True, text=True, env=e, cwd=cwd,
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+        env=e, cwd=cwd,
     )
     return proc.returncode, proc.stdout, proc.stderr
 
@@ -539,7 +540,8 @@ class DotfixTest(unittest.TestCase):
         env["PYTHONIOENCODING"] = "cp1252"
         proc = subprocess.run(
             [sys.executable, str(DOTFIX), "doctor"],
-            capture_output=True, text=True, env=env,
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            env=env,
         )
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertIn("doctor", proc.stdout)
