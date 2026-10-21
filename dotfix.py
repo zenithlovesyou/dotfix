@@ -308,8 +308,11 @@ def same_path(a: Path, b: Path) -> bool:
     still matches the plain path it was created from.
     """
     try:
-        left = strip_extended_prefix(os.path.realpath(str(a)))
-        right = strip_extended_prefix(os.path.realpath(str(b)))
+        # Strip before resolving too: on Windows realpath() keeps the \\?\
+        # prefix if the input had one and drops it if it did not, so the two
+        # spellings of the same path would only ever differ by the prefix.
+        left = strip_extended_prefix(os.path.realpath(strip_extended_prefix(str(a))))
+        right = strip_extended_prefix(os.path.realpath(strip_extended_prefix(str(b))))
         return os.path.normcase(left) == os.path.normcase(right)
     except Exception:
         return False

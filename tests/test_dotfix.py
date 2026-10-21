@@ -552,6 +552,21 @@ class DotfixTest(unittest.TestCase):
         alias.symlink_to(real)
         self.assertTrue(mod.same_path(alias / "x", real / "x"))
 
+    def test_extended_length_prefix_is_stripped(self):
+        """Windows readlink() returns a \\\\?\\ device path; it must normalise."""
+        import importlib
+        mod = importlib.import_module("dotfix")
+        self.assertEqual(
+            mod.strip_extended_prefix(r"\\?\C:\Users\me"), r"C:\Users\me"
+        )
+        self.assertEqual(
+            mod.strip_extended_prefix(r"\\?\UNC\srv\share"), r"\\srv\share"
+        )
+        # A path without the prefix is left alone.
+        self.assertEqual(
+            mod.strip_extended_prefix(r"C:\Users\me"), r"C:\Users\me"
+        )
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
