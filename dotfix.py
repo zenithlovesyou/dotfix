@@ -328,7 +328,9 @@ def check_symlink(source: Path, target: Path) -> SymlinkInfo:
         if target_path.is_symlink():
             try:
                 raw = os.readlink(str(target_path))
-                resolved = Path(raw)
+                # Windows readlink() hands back a \\?\ device path; drop the
+                # prefix so the target is an ordinary path from here on.
+                resolved = Path(strip_extended_prefix(raw))
                 if not resolved.is_absolute():
                     resolved = target_path.parent / resolved
                 valid = same_path(resolved, source)
@@ -700,7 +702,7 @@ def diff_dirs(a: Path, b: Path) -> str:
         out = {}
         for p in sorted(root.rglob("*")):
             if p.is_symlink():
-                out[str(p.relative_to(root))] = ("link", os.readlink(p))
+                out[str(p.relative_to(root))] = ("link", strip_extended_prefix(os.readlink(p)))
             elif p.is_file():
                 out[str(p.relative_to(root))] = ("file", sha256_file(p))
         return out
