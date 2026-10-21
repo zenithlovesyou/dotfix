@@ -21,6 +21,30 @@ os.environ["LC_ALL"] = "C"
 os.environ["LANG"] = "C"
 
 
+def _enable_utf8_output():
+    """Make stdout able to carry the box-drawing and status characters.
+
+    Windows consoles default to a legacy code page (cp1252), where '╭' and
+    '✓' have no representation — printing them raises UnicodeEncodeError.
+    Reconfigure the stream when it supports it, and fall back to replacing
+    unencodable characters on older Pythons.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        encoding = (getattr(stream, "encoding", "") or "").lower()
+        if "utf" in encoding:
+            return
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError, OSError):
+            try:
+                sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+            except (AttributeError, ValueError, OSError):
+                pass
+
+
+_enable_utf8_output()
+
+
 class Color:
     RED = "\033[0;31m"
     GREEN = "\033[0;32m"

@@ -516,6 +516,21 @@ class DotfixTest(unittest.TestCase):
         self.assertTrue(link.is_dir())
         self.assertEqual(os.readlink(str(link)), str(src))
 
+    def test_output_survives_legacy_console_encoding(self):
+        """Windows consoles default to cp1252, where box-drawing chars crash."""
+        repo = self.sb.make_repo("dots", {"nvim/init.lua": "x"})
+        self.sb.configure([("dots", repo, ["*"])])
+
+        env = dict(self.env)
+        env["PYTHONIOENCODING"] = "cp1252"
+        proc = subprocess.run(
+            [sys.executable, str(DOTFIX), "doctor"],
+            capture_output=True, text=True, env=env,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("doctor", proc.stdout)
+        self.assertNotIn("UnicodeEncodeError", proc.stderr)
+
     @unittest.skipUnless(symlinks_supported(), "this platform cannot create symlinks")
     def test_same_path_handles_case_and_symlinked_parents(self):
         """same_path must collapse symlinked parents and ignore case on Windows."""
