@@ -531,7 +531,11 @@ class DotfixTest(unittest.TestCase):
         repo = self.sb.make_repo("dots", {"nvim/init.lua": "x"})
         self.sb.configure([("dots", repo, ["*"])])
 
-        env = dict(self.env)
+        # Start from the inherited environment: a child process that lacks
+        # SystemRoot cannot load the Windows crypto library, and Python 3.9
+        # and 3.10 then die before main() with a fatal random-seed error.
+        env = dict(os.environ)
+        env.update(self.env)
         env["PYTHONIOENCODING"] = "cp1252"
         proc = subprocess.run(
             [sys.executable, str(DOTFIX), "doctor"],
