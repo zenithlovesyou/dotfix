@@ -11,7 +11,6 @@ import shutil
 import subprocess
 import argparse
 import hashlib
-import locale
 from pathlib import Path
 from dataclasses import dataclass, field
 from typing import Optional
@@ -43,6 +42,18 @@ class Platform(Enum):
     TERMUX = "termux"
 
 
+def expand_user(path: str) -> Path:
+    """Expand a leading ~ using the same home directory the tool uses.
+
+    pathlib's expanduser() goes straight to USERPROFILE on Windows, ignoring
+    $HOME, so it would disagree with user_home().
+    """
+    p = Path(path)
+    if path.startswith("~"):
+        return user_home() / p.relative_to("~")
+    return p
+
+
 @dataclass
 class RepoConfig:
     name: str
@@ -62,6 +73,7 @@ class SymlinkInfo:
     target_exists: bool
     drift: bool = False
     drift_details: str = ""
+    is_symlink: bool = False
 
 
 def detect_platform() -> Platform:
@@ -93,20 +105,32 @@ def load_repos() -> list[RepoConfig]:
     return repos if repos else DEFAULT_REPOS
 
 
+def user_home() -> Path:
+    """Home directory, honouring $HOME on every platform.
+
+    Windows' Path.home() reads USERPROFILE and ignores HOME, which makes the
+    tool impossible to sandbox or relocate via the environment.
+    """
+    home = os.environ.get("HOME")
+    if home:
+        return Path(home)
+    return Path.home()
+
+
 def find_config_dir() -> Path:
     if PLATFORM == Platform.WINDOWS:
-        return Path(os.environ.get("APPDATA", Path.home() / "AppData" / "Roaming"))
+        return Path(os.environ.get("APPDATA", user_home() / "AppData" / "Roaming"))
     if PLATFORM == Platform.MACOS:
-        return Path.home() / "Library" / "Application Support"
-    return Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
+        return user_home() / "Library" / "Application Support"
+    return Path(os.environ.get("XDG_CONFIG_HOME") or user_home() / ".config")
 
 
 CONFIG_DIR = find_config_dir()
 DEFAULT_REPOS = [
-    RepoConfig("dotfiles", Path.home() / "dotfiles", CONFIG_DIR),
-    RepoConfig("dotfiles-alt", Path.home() / ".dotfiles", CONFIG_DIR),
+    RepoConfig("dotfiles", user_home() / "dotfiles", CONFIG_DIR),
+    RepoConfig("dotfiles-alt", user_home() / ".dotfiles", CONFIG_DIR),
 ]
-STATE_FILE = Path.home() / ".local" / "state" / "dotfix" / "state.json"
+STATE_FILE = user_home() / ".local" / "state" / "dotfix" / "state.json"
 
 
 def ensure_state_dir():
@@ -133,6 +157,19 @@ def sha256_file(path: Path) -> str:
         return hashlib.sha256(path.read_bytes()).hexdigest()[:16]
     except Exception:
         return ""
+
+
+def create_symlink(link: Path, target: Path):
+    """Create a symlink at `link` pointing to `target`.
+
+    Windows needs the target_is_directory flag for directory targets, and
+    pathlib only gained that keyword in Python 3.10 — so fall back to
+    os.symlink on 3.9.
+    """
+    try:
+        link.symlink_to(target, target_is_directory=target.is_dir())
+    except TypeError:
+        os.symlink(str(target), str(link), target_is_directory=target.is_dir())
 
 
 def should_ignore(name: str, ignore_patterns: list[str]) -> bool:
@@ -203,6 +240,18 @@ def scan_repo(repo: RepoConfig) -> list[Path]:
     return items
 
 
+def same_path(a: Path, b: Path) -> bool:
+    """Compare two paths the way the platform does.
+
+    realpath() collapses symlinked parents (macOS /var -> /private/var) and
+    normcase() makes the comparison case-insensitive on Windows.
+    """
+    try:
+        return os.path.normcase(os.path.realpath(str(a))) == os.path.normcase(os.path.realpath(str(b)))
+    except Exception:
+        return False
+
+
 def check_symlink(source: Path, target: Path) -> SymlinkInfo:
     target_path = target / source.name
     exists = target_path.exists() or target_path.is_symlink()
@@ -215,12 +264,20 @@ def check_symlink(source: Path, target: Path) -> SymlinkInfo:
     if exists:
         if target_path.is_symlink():
             try:
-                resolved = target_path.resolve()
-                valid = resolved == source.resolve()
-                broken = not valid
+                raw = os.readlink(str(target_path))
+                resolved = Path(raw)
+                if not resolved.is_absolute():
+                    resolved = target_path.parent / resolved
+                valid = same_path(resolved, source)
+                # A symlink is broken when the thing it points at is gone —
+                # not merely when it points somewhere unexpected.
+                broken = not resolved.exists()
                 if not valid:
                     drift = True
-                    drift_details = f"points to {resolved} instead of {source}"
+                    if broken:
+                        drift_details = f"points to {raw} which no longer exists"
+                    else:
+                        drift_details = f"points to {raw} instead of {source}"
             except Exception:
                 broken = True
                 drift = True
@@ -233,7 +290,8 @@ def check_symlink(source: Path, target: Path) -> SymlinkInfo:
             if source.is_file() and target_path.is_file():
                 if sha256_file(source) != sha256_file(target_path):
                     drift_details += " + content differs"
-    return SymlinkInfo(source, target_path, exists, valid, broken, target_exists, drift, drift_details)
+    return SymlinkInfo(source, target_path, exists, valid, broken, target_exists, drift, drift_details,
+                       target_path.is_symlink())
 
 
 @dataclass
@@ -355,13 +413,13 @@ def cmd_add_repo(args):
     state = load_state()
     repos = state.get("repos", [])
 
-    repo_path = Path(args.path).expanduser().resolve()
+    repo_path = expand_user(args.path).resolve()
     if not repo_path.exists():
         print(f"{Color.RED}Path does not exist: {repo_path}{Color.RESET}")
         return 1
 
     name = args.name or repo_path.name
-    target = Path(args.target).expanduser().resolve() if args.target else CONFIG_DIR
+    target = expand_user(args.target).resolve() if args.target else CONFIG_DIR
 
     new_repo = {
         "name": name,
@@ -461,7 +519,14 @@ def cmd_sync(args):
             skipped += 1
             continue
 
-        if info.exists and not force and not info.broken:
+        # A broken symlink is ours to repair — its target is already gone, so
+        # nothing can be lost. A real file/dir, or a symlink pointing at some
+        # other live location, is a conflict: never clobber it without --force.
+        if info.exists and info.is_symlink and not info.broken and not force:
+            print(f"{Color.YELLOW}  ⊘ Conflict (use --force): {item.name}{Color.RESET}")
+            skipped += 1
+            continue
+        if info.exists and not info.is_symlink and not force:
             print(f"{Color.YELLOW}  ⊘ Conflict (use --force): {item.name}{Color.RESET}")
             skipped += 1
             continue
@@ -480,7 +545,7 @@ def cmd_sync(args):
                     target_path.unlink()
 
             target_path.parent.mkdir(parents=True, exist_ok=True)
-            target_path.symlink_to(item.resolve())
+            create_symlink(target_path, item.resolve())
             if info.exists:
                 print(f"{Color.YELLOW}  ⟳ Repaired: {item.name}{Color.RESET}")
                 repaired += 1
@@ -505,11 +570,11 @@ def cmd_clean(args):
 
     # Only the owning repo's items count as managed; shadowed copies are not
     # targets, so a symlink pointing at one is still an orphan.
-    all_managed = set()
+    all_managed = []
     for entry in build_plan(repos):
         if entry.shadowed:
             continue
-        all_managed.add((entry.repo.target / entry.item.name).resolve())
+        all_managed.append(entry.repo.target / entry.item.name)
 
     dry_run = args.dry_run
     removed = 0
@@ -525,17 +590,15 @@ def cmd_clean(args):
         for target_item in sorted(repo.target.iterdir()):
             if not target_item.is_symlink():
                 continue
-            try:
-                resolved = target_item.resolve()
-                if resolved in all_managed:
-                    continue
-                reason = "orphan"
-            except Exception:
-                resolved = None
-                reason = "broken"
+            # resolve() does not raise for a dangling link on modern Python,
+            # so detect "broken" by asking whether the destination still exists.
+            resolved = target_item.resolve()
+            if resolved.exists() and any(same_path(resolved, m) for m in all_managed):
+                continue
+            reason = "orphan" if resolved.exists() else "broken"
 
             if dry_run:
-                arrow = f" → {resolved}" if resolved else ""
+                arrow = f" → {resolved}"
                 print(f"{Color.BLUE}  → Would remove {reason}: {target_item.name}{arrow}{Color.RESET}")
             else:
                 target_item.unlink()
@@ -545,6 +608,48 @@ def cmd_clean(args):
     if not dry_run:
         print(f"\n{Color.BOLD}Removed {removed} orphan/broken symlinks{Color.RESET}")
     return 0
+
+
+def diff_files(a: Path, b: Path):
+    """Unified diff between two files, using difflib when `diff` is absent."""
+    if shutil.which("diff"):
+        try:
+            result = subprocess.run(
+                ["diff", "-u", str(a), str(b)], capture_output=True, text=True, check=False,
+            )
+            return result.stdout
+        except Exception:
+            pass
+    import difflib
+    try:
+        left = a.read_text(errors="replace").splitlines(keepends=True)
+        right = b.read_text(errors="replace").splitlines(keepends=True)
+    except Exception:
+        return ""
+    return "".join(difflib.unified_diff(left, right, str(a), str(b)))
+
+
+def diff_dirs(a: Path, b: Path) -> str:
+    """Report which files in two trees differ. Pure Python, no `diff` needed."""
+    def tree(root: Path) -> dict:
+        out = {}
+        for p in sorted(root.rglob("*")):
+            if p.is_symlink():
+                out[str(p.relative_to(root))] = ("link", os.readlink(p))
+            elif p.is_file():
+                out[str(p.relative_to(root))] = ("file", sha256_file(p))
+        return out
+
+    left, right = tree(a), tree(b)
+    lines = []
+    for name in sorted(set(left) | set(right)):
+        if name not in left:
+            lines.append(f"Only in {b}: {name}")
+        elif name not in right:
+            lines.append(f"Only in {a}: {name}")
+        elif left[name] != right[name]:
+            lines.append(f"Files {a}/{name} and {b}/{name} differ")
+    return "\n".join(lines)
 
 
 def cmd_diff(args):
@@ -565,24 +670,16 @@ def cmd_diff(args):
         if item.is_file() and target_path.is_file():
             if sha256_file(item) != sha256_file(target_path):
                 print(f"{Color.YELLOW}Drift:{Color.RESET} {repo.name}/{item.name}")
-                try:
-                    subprocess.run(["diff", "-u", str(item), str(target_path)], check=False)
-                except Exception:
-                    pass
+                out = diff_files(item, target_path)
+                if out:
+                    print(out)
                 changes += 1
         elif item.is_dir() and target_path.is_dir():
-            # Compare directory trees
-            try:
-                result = subprocess.run(
-                    ["diff", "-r", "-q", str(item), str(target_path)],
-                    capture_output=True, text=True, check=False,
-                )
-                if result.stdout.strip():
-                    print(f"{Color.YELLOW}Drift:{Color.RESET} {repo.name}/{item.name}")
-                    print(result.stdout)
-                    changes += 1
-            except Exception:
-                pass
+            out = diff_dirs(item, target_path)
+            if out.strip():
+                print(f"{Color.YELLOW}Drift:{Color.RESET} {repo.name}/{item.name}")
+                print(out)
+                changes += 1
 
     if not changes:
         print(f"{Color.GREEN}No drift detected.{Color.RESET}")
@@ -592,7 +689,7 @@ def cmd_diff(args):
 def cmd_backup(args):
     """Back up conflicting real files before a forced sync."""
     repos = load_repos()
-    backup_root = Path.home() / ".local" / "state" / "dotfix" / "backups"
+    backup_root = user_home() / ".local" / "state" / "dotfix" / "backups"
     stamp = args.stamp or str(int(__import__("time").time()))
 
     dest = backup_root / stamp
@@ -647,10 +744,10 @@ def cmd_import(args):
 
     # Build the set of every path a repo claims, across all repos. A symlink is
     # managed if it points at any of them — not just the ones for one repo.
-    managed_paths = {}
+    managed_paths = []
     for entry in build_plan(repos):
         try:
-            managed_paths.setdefault(entry.item.resolve(), entry.repo.name)
+            managed_paths.append((entry.item, entry.repo.name))
         except Exception:
             continue
 
@@ -669,14 +766,17 @@ def cmd_import(args):
         for target_item in sorted(target.iterdir()):
             if not target_item.is_symlink():
                 continue
-            try:
-                resolved = target_item.resolve()
-            except Exception:
+            resolved = target_item.resolve()
+            if not resolved.exists():
                 print(f"{Color.RED}  ✗ Broken: {target_item.name}{Color.RESET}")
                 broken += 1
                 continue
 
-            owner = managed_paths.get(resolved)
+            owner = None
+            for path, name in managed_paths:
+                if same_path(resolved, path):
+                    owner = name
+                    break
             if owner:
                 print(f"{Color.GREEN}  ✓ Managed: {target_item.name} → {owner}{Color.RESET}")
                 imported += 1

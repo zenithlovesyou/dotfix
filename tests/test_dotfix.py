@@ -14,19 +14,49 @@ import unittest
 from pathlib import Path
 
 DOTFIX = Path(__file__).resolve().parent.parent / "dotfix.py"
+# Make "import dotfix" work so the tests can exercise internals directly.
+sys.path.insert(0, str(DOTFIX.parent))
 
 
 def run(args, env=None, cwd=None):
     """Invoke dotfix as a subprocess and return (returncode, stdout, stderr)."""
     e = dict(os.environ)
-    e["XDG_CONFIG_HOME"] = str(cwd) if cwd else e.get("XDG_CONFIG_HOME", "")
     if env:
         e.update(env)
+    e.setdefault("XDG_CONFIG_HOME", str(cwd) if cwd else "")
     proc = subprocess.run(
         [sys.executable, str(DOTFIX), *args],
         capture_output=True, text=True, env=e, cwd=cwd,
     )
     return proc.returncode, proc.stdout, proc.stderr
+
+
+def make_symlink(link: Path, target: Path):
+    """Create a symlink the way the platform expects it.
+
+    Windows needs the directory flag set for directory targets, and pathlib
+    only supports it from Python 3.10.
+    """
+    try:
+        link.symlink_to(target, target_is_directory=target.is_dir())
+    except TypeError:
+        os.symlink(str(target), str(link), target_is_directory=target.is_dir())
+
+
+def symlinks_supported() -> bool:
+    """True if this platform lets us create symlinks without elevation.
+
+    On Windows that needs Developer Mode or admin rights; CI runners have
+    neither by default, so the symlink tests skip instead of failing.
+    """
+    probe_dir = Path(tempfile.mkdtemp(prefix="dotfix-probe-"))
+    try:
+        os.symlink(str(probe_dir), str(probe_dir / "link"), target_is_directory=True)
+        return True
+    except (OSError, NotImplementedError, AttributeError):
+        return False
+    finally:
+        shutil.rmtree(probe_dir, ignore_errors=True)
 
 
 class Sandbox:
@@ -70,13 +100,19 @@ class Sandbox:
 
 class DotfixTest(unittest.TestCase):
     def setUp(self):
-        self.tmp = Path(tempfile.mkdtemp(prefix="dotfix-test-"))
+        # Resolve the temp dir: on macOS /var is a symlink to /private/var, so
+        # an unresolved path would never match the resolved symlink target.
+        self.tmp = Path(tempfile.mkdtemp(prefix="dotfix-test-")).resolve()
         self.home = self.tmp / "home"
         self.config = self.home / ".config"
         self.home.mkdir(parents=True)
         self.config.mkdir(parents=True)
         self.sb = Sandbox(self.home, self.config)
-        self.env = {"HOME": str(self.home)}
+        self.env = {
+            "HOME": str(self.home),
+            "USERPROFILE": str(self.home),
+            "APPDATA": str(self.home / "AppData" / "Roaming"),
+        }
 
     def tearDown(self):
         shutil.rmtree(self.tmp, ignore_errors=True)
@@ -95,6 +131,8 @@ class DotfixTest(unittest.TestCase):
 
     # ---------- tests ----------
 
+    @unittest.skipUnless(symlinks_supported(),
+                     "this platform cannot create symlinks")
     def test_sync_creates_symlinks(self):
         repo = self.sb.make_repo("dots", {"nvim/init.lua": "x", "tmux/tmux.conf": "y"})
         self.sb.configure([("dots", repo, ["*"])])
@@ -105,6 +143,8 @@ class DotfixTest(unittest.TestCase):
         self.assertTrue((self.config / "tmux").is_symlink())
         self.assertEqual(self.symlink_target("nvim"), str(repo / "nvim"))
 
+    @unittest.skipUnless(symlinks_supported(),
+                     "this platform cannot create symlinks")
     def test_doctor_reports_ok(self):
         repo = self.sb.make_repo("dots", {"nvim/init.lua": "x"})
         self.sb.configure([("dots", repo, ["*"])])
@@ -114,11 +154,13 @@ class DotfixTest(unittest.TestCase):
         self.assertEqual(rc, 0, err)
         self.assertIn("OK: nvim", out)
 
+    @unittest.skipUnless(symlinks_supported(),
+                     "this platform cannot create symlinks")
     def test_broken_symlink_is_detected_and_repaired(self):
         repo = self.sb.make_repo("dots", {"nvim/init.lua": "x"})
         self.sb.configure([("dots", repo, ["*"])])
         # Point the symlink at a path that does not exist
-        (self.config / "nvim").symlink_to(self.home / "gone")
+        make_symlink(self.config / "nvim", self.home / "gone")
 
         rc, out, err = self.dotfix("doctor")
         self.assertIn("Broken symlink: nvim", out)
@@ -127,6 +169,8 @@ class DotfixTest(unittest.TestCase):
         self.assertEqual(rc, 0, err)
         self.assertEqual(self.symlink_target("nvim"), str(repo / "nvim"))
 
+    @unittest.skipUnless(symlinks_supported(),
+                     "this platform cannot create symlinks")
     def test_missing_symlink_is_created(self):
         repo = self.sb.make_repo("dots", {"nvim/init.lua": "x"})
         self.sb.configure([("dots", repo, ["*"])])
@@ -152,6 +196,8 @@ class DotfixTest(unittest.TestCase):
         self.assertFalse((self.config / "nvim").is_symlink())
         self.assertTrue((self.config / "nvim" / "mine.lua").exists())
 
+    @unittest.skipUnless(symlinks_supported(),
+                     "this platform cannot create symlinks")
     def test_force_overwrites_regular_file(self):
         repo = self.sb.make_repo("dots", {"nvim/init.lua": "x"})
         self.sb.configure([("dots", repo, ["*"])])
@@ -160,6 +206,25 @@ class DotfixTest(unittest.TestCase):
         rc, out, err = self.dotfix("sync", "--force")
         self.assertEqual(rc, 0, err)
         self.assertTrue((self.config / "nvim").is_symlink())
+
+    @unittest.skipUnless(symlinks_supported(),
+                     "this platform cannot create symlinks")
+    def test_conflict_on_symlink_to_other_location(self):
+        """A symlink pointing somewhere we don't own is skipped, not clobbered."""
+        repo = self.sb.make_repo("dots", {"nvim/init.lua": "x"})
+        self.sb.configure([("dots", repo, ["*"])])
+
+        # The user linked nvim to their own location by hand.
+        mine = self.home / "my-nvim"
+        mine.mkdir()
+        (mine / "init.lua").write_text("mine")
+        make_symlink(self.config / "nvim", mine)
+
+        rc, out, err = self.dotfix("sync")
+        self.assertIn("Conflict", out)
+        # The hand-made link must survive untouched.
+        self.assertEqual(os.readlink(str(self.config / "nvim")), str(mine))
+        self.assertTrue((self.config / "nvim" / "init.lua").exists())
 
     def test_backup_saves_conflicting_files(self):
         repo = self.sb.make_repo("dots", {"nvim/init.lua": "x"})
@@ -173,6 +238,8 @@ class DotfixTest(unittest.TestCase):
         self.assertTrue(saved.exists())
         self.assertEqual(saved.read_text(), "mine")
 
+    @unittest.skipUnless(symlinks_supported(),
+                     "this platform cannot create symlinks")
     def test_precedence_first_repo_owns_name(self):
         r1 = self.sb.make_repo("first", {"nvim/init.lua": "1"})
         r2 = self.sb.make_repo("second", {"nvim/init.lua": "2"})
@@ -184,6 +251,8 @@ class DotfixTest(unittest.TestCase):
         self.dotfix("sync")
         self.assertEqual(self.symlink_target("nvim"), str(r1 / "nvim"))
 
+    @unittest.skipUnless(symlinks_supported(),
+                     "this platform cannot create symlinks")
     def test_precedence_order_is_respected(self):
         r1 = self.sb.make_repo("first", {"nvim/init.lua": "1"})
         r2 = self.sb.make_repo("second", {"nvim/init.lua": "2"})
@@ -196,6 +265,8 @@ class DotfixTest(unittest.TestCase):
         self.dotfix("sync")
         self.assertEqual(self.symlink_target("nvim"), str(r2 / "nvim"))
 
+    @unittest.skipUnless(symlinks_supported(),
+                     "this platform cannot create symlinks")
     def test_subdirectory_pattern(self):
         repo = self.sb.make_repo("dots", {"config/nvim/init.lua": "x", "config/kitty/kitty.conf": "y"})
         self.sb.configure([("dots", repo, ["config/*"])])
@@ -218,6 +289,8 @@ class DotfixTest(unittest.TestCase):
         self.assertFalse((self.config / "README.md").exists())
         self.assertFalse((self.config / ".git").exists())
 
+    @unittest.skipUnless(symlinks_supported(),
+                     "this platform cannot create symlinks")
     def test_clean_removes_orphan_symlinks(self):
         repo = self.sb.make_repo("dots", {"nvim/init.lua": "x"})
         self.sb.configure([("dots", repo, ["*"])])
@@ -226,7 +299,7 @@ class DotfixTest(unittest.TestCase):
         # An orphan pointing somewhere outside any repo
         other = self.home / "other"
         other.mkdir()
-        (self.config / "orphan").symlink_to(other)
+        make_symlink(self.config / "orphan", other)
 
         rc, out, err = self.dotfix("clean", "--dry-run")
         self.assertIn("Would remove orphan: orphan", out)
@@ -238,10 +311,12 @@ class DotfixTest(unittest.TestCase):
         # managed symlink must survive
         self.assertTrue((self.config / "nvim").is_symlink())
 
+    @unittest.skipUnless(symlinks_supported(),
+                     "this platform cannot create symlinks")
     def test_clean_removes_broken_symlinks(self):
         repo = self.sb.make_repo("dots", {"nvim/init.lua": "x"})
         self.sb.configure([("dots", repo, ["*"])])
-        (self.config / "dangling").symlink_to(self.home / "nowhere")
+        make_symlink(self.config / "dangling", self.home / "nowhere")
 
         rc, out, err = self.dotfix("clean")
         self.assertEqual(rc, 0, err)
@@ -291,6 +366,8 @@ class DotfixTest(unittest.TestCase):
         rc, out, err = self.dotfix("repo", "list")
         self.assertNotIn("dots", out)
 
+    @unittest.skipUnless(symlinks_supported(),
+                     "this platform cannot create symlinks")
     def test_clean_does_not_follow_symlink_out_of_target(self):
         """clean must unlink the symlink, never delete the real file behind it."""
         repo = self.sb.make_repo("dots", {"nvim/init.lua": "x"})
@@ -299,8 +376,8 @@ class DotfixTest(unittest.TestCase):
         precious = self.home / "precious"
         precious.mkdir()
         (precious / "file.txt").write_text("IMPORTANT DATA")
-        (self.config / "danger").symlink_to(precious)
-        (self.config / "dangerfile").symlink_to(precious / "file.txt")
+        make_symlink(self.config / "danger", precious)
+        make_symlink(self.config / "dangerfile", precious / "file.txt")
 
         rc, out, err = self.dotfix("clean")
         self.assertEqual(rc, 0, err)
@@ -330,6 +407,8 @@ class DotfixTest(unittest.TestCase):
         self.assertEqual(plain.read_text(), "not managed, must stay")
         self.assertTrue((plain_dir / "inside.txt").exists())
 
+    @unittest.skipUnless(symlinks_supported(),
+                     "this platform cannot create symlinks")
     def test_import_reports_managed_and_orphan(self):
         r1 = self.sb.make_repo("first", {"nvim/init.lua": "1"})
         r2 = self.sb.make_repo("second", {"swaync/config": "2"})
@@ -339,7 +418,7 @@ class DotfixTest(unittest.TestCase):
         # An orphan pointing outside every repo
         other = self.home / "other"
         other.mkdir()
-        (self.config / "orphan").symlink_to(other)
+        make_symlink(self.config / "orphan", other)
 
         rc, out, err = self.dotfix("import")
         self.assertEqual(rc, 0, err)
@@ -347,6 +426,8 @@ class DotfixTest(unittest.TestCase):
         self.assertIn("Managed: swaync", out)
         self.assertIn("Orphan: orphan", out)
 
+    @unittest.skipUnless(symlinks_supported(),
+                     "this platform cannot create symlinks")
     def test_import_scans_shared_target_once(self):
         """Two repos pointing at one target must not double-report symlinks."""
         r1 = self.sb.make_repo("first", {"nvim/init.lua": "1"})
@@ -361,6 +442,8 @@ class DotfixTest(unittest.TestCase):
         self.assertEqual(out.count("Managed: swaync"), 1)
         self.assertEqual(out.count("Orphan"), 0)
 
+    @unittest.skipUnless(symlinks_supported(),
+                     "this platform cannot create symlinks")
     def test_idempotent_sync(self):
         repo = self.sb.make_repo("dots", {"nvim/init.lua": "x", "tmux/tmux.conf": "y"})
         self.sb.configure([("dots", repo, ["*"])])
@@ -373,6 +456,8 @@ class DotfixTest(unittest.TestCase):
         self.assertEqual(first, second)
         self.assertTrue((self.config / "nvim").is_symlink())
 
+    @unittest.skipUnless(symlinks_supported(),
+                     "this platform cannot create symlinks")
     def test_nested_config_dir_is_created(self):
         repo = self.sb.make_repo("dots", {"nvim/init.lua": "x"})
         self.sb.configure([("dots", repo, ["*"])])
@@ -399,6 +484,48 @@ class DotfixTest(unittest.TestCase):
 
         rc, out, err = self.dotfix("sync")
         self.assertIn("source not found", out)
+
+    def test_home_env_is_honored(self):
+        """Path.home() ignores $HOME on Windows — the tool must not."""
+        import importlib
+        mod = importlib.import_module("dotfix")
+        old = {k: os.environ.get(k) for k in ("HOME", "USERPROFILE")}
+        try:
+            os.environ["HOME"] = str(self.home)
+            os.environ["USERPROFILE"] = str(self.home)
+            self.assertEqual(str(mod.user_home()), str(self.home))
+            self.assertEqual(str(mod.expand_user("~/dots")), str(self.home / "dots"))
+        finally:
+            for k, v in old.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+
+    @unittest.skipUnless(symlinks_supported(), "no symlink support on this platform")
+    def test_create_symlink_marks_directories(self):
+        """Directory symlinks must be created with target_is_directory=True."""
+        import importlib
+        mod = importlib.import_module("dotfix")
+        src = self.home / "srcdir"
+        src.mkdir()
+        (src / "f.txt").write_text("x")
+        link = self.home / "linkdir"
+        mod.create_symlink(link, src)
+        self.assertTrue(link.is_symlink())
+        self.assertTrue(link.is_dir())
+        self.assertEqual(os.readlink(str(link)), str(src))
+
+    @unittest.skipUnless(symlinks_supported(), "this platform cannot create symlinks")
+    def test_same_path_handles_case_and_symlinked_parents(self):
+        """same_path must collapse symlinked parents and ignore case on Windows."""
+        import importlib
+        mod = importlib.import_module("dotfix")
+        real = self.home / "real"
+        real.mkdir()
+        alias = self.home / "alias"
+        alias.symlink_to(real)
+        self.assertTrue(mod.same_path(alias / "x", real / "x"))
 
 
 if __name__ == "__main__":

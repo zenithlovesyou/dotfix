@@ -24,6 +24,8 @@ jobs:
 
       - name: Run tests
         # The suite builds its own temp HOME, so a real config dir is never touched.
+        # On Windows the symlink tests skip themselves when the runner has no
+        # symlink permission — the rest of the suite still runs there.
         run: python -m unittest discover -s tests -v
 
   lint:

@@ -7,7 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.1.0] - 2026-10-21
+### Fixed
+
+- macOS `Path.resolve()` collapses symlinked parents (`/var` → `/private/var`);
+  `dotfix` now compares resolved paths and reports dangling links correctly.
+- Windows `Path.home()` ignores `$HOME` (uses `USERPROFILE`), which made the
+  tool unable to follow a sandbox's fake home; `user_home()` honors `$HOME`.
+- Windows directory symlinks were created without `target_is_directory=True`,
+  so pathlib created them as file symlinks; `create_symlink` now sets the flag.
+- `dotfix diff` silently failed on Linux/macOS where the `diff` binary is
+  absent; switched to pure-Python `difflib` for files and a recursive sha-set
+  comparison for directories — no platform binary required.
+- A symlink pointing at some other live location was clobbered silently; now
+  reported as a conflict unless `--force`.
+- Broken-vs-orphan classification in `clean` and `import` used `resolve()`'s
+  (non-raising) behaviour, making "broken" detection dead code on modern Python.
+- `clean` did not report shadowed repo copies as managed when scanning shared
+  targets, and `import` could double-report each symlink. Both fixed.
+
+[Unreleased]: https://github.com/zenithlovesyou/dotfix/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/zenithlovesyou/dotfix/releases/tag/v0.1.0
 
 Initial release.
 
