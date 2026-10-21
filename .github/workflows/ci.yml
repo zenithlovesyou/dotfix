@@ -26,7 +26,11 @@ jobs:
         # The suite builds its own temp HOME, so a real config dir is never touched.
         # On Windows the symlink tests skip themselves when the runner has no
         # symlink permission — the rest of the suite still runs there.
-        run: python -m unittest discover -s tests -v
+        #
+        # ci_report.py wraps the run so that failures show up as annotations
+        # and in the job summary: a job's raw log is only readable by admins
+        # of the repository, but annotations are visible to everyone.
+        run: python tests/ci_report.py
 
       - name: Report environment
         if: always()
@@ -45,6 +49,14 @@ jobs:
           except OSError as e:
               print('symlinks: NOT supported —', e)
           "
+
+      - name: Upload test log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-log-${{ matrix.os }}-py${{ matrix.python-version }}
+          path: ci-tests.log
+          if-no-files-found: ignore
 
   lint:
     name: lint
